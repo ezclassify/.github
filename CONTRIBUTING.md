@@ -13,8 +13,10 @@ their own CONTRIBUTING.md.
 2. **Fork the repository.** All contributions come through pull requests from
    forks. Direct pushes to official repositories are not permitted.
 
-3. **Open an issue first** for non-trivial changes. This lets us discuss the
-   approach before you invest time in implementation.
+3. **Open an issue first** for non-trivial changes, on the central tracker at
+   [github.com/ezclassify/ezclassify](https://github.com/ezclassify/ezclassify).
+   Per-repo Issues tabs are disabled; everything is tracked there. This lets us
+   discuss the approach before you invest time in implementation.
 
 ## Development Workflow
 
