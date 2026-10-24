@@ -1,21 +1,22 @@
 ## Summary
 
-<!-- What does this PR do? Keep it brief. -->
+<!-- What this changes, and why. -->
 
-## Changes
+## Linked issue
 
-<!-- List the key changes. -->
+<!-- Fixes ezclassify/ezclassify#NNN, or "none" for a small fix. Issues for every EzClassify repository are tracked in ezclassify/ezclassify. -->
 
--
+## Verification
 
-## Testing
+<!-- Check each command you ran, and note anything you verified by hand. -->
 
-<!-- How did you verify this works? -->
+- [ ] Ran this repository's documented build and tests
 
-- [ ] Tests pass (`npm test`)
-- [ ] Lint passes (`npx eslint .`)
-- [ ] Type check passes (`npx tsc --noEmit`)
+## Checklist
 
-## Related Issues
-
-<!-- Link any related issues: Fixes #123, Closes #456 -->
+- [ ] New behavior has a test that fails without the change
+- [ ] Documentation is updated, or none was needed
+- [ ] Commit subjects follow Conventional Commits (`fix:`, `feat:`, `docs:`)
+- [ ] Every commit is signed off (`git commit -s`)
+- [ ] Changes to the public API are called out in the summary
+- [ ] Generated files changed only through their generator

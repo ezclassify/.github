@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Open an issue on the EzClassify tracker
+    url: https://github.com/ezclassify/ezclassify/issues/new/choose
+    about: 'Issues for every EzClassify app are tracked in ezclassify/ezclassify. Choose a form there and answer What are you using? with the app you use, or "Not sure".'
+  - name: Report a security vulnerability
+    url: https://github.com/ezclassify/ezclassify/blob/main/SECURITY.md
+    about: Do not open a public issue for a vulnerability. Follow the security policy instead.
