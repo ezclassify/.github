@@ -1,0 +1,23 @@
+name: Set up Node and supported npm
+description: Set up the requested Node version and the supported npm 11 toolchain.
+inputs:
+  node-version:
+    description: Node.js version passed to actions/setup-node.
+    required: true
+  registry-url:
+    description: Optional native setup-node registry URL; credentials stay with the caller.
+    default: ''
+  scope:
+    description: Optional native setup-node registry scope.
+    default: ''
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        registry-url: ${{ inputs.registry-url }}
+        scope: ${{ inputs.scope }}
+    - name: Install supported npm
+      shell: bash
+      run: npm install -g npm@^11.10.0

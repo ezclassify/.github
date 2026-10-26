@@ -26,3 +26,51 @@ jobs:
           node-version: '22'
       - name: Clean and historical-leak controls exercise the shared command
         run: node --test test/secret-scan.integration.mjs
+
+  setup-node-npm:
+    name: Node/npm setup (${{ matrix.node-version }}, ${{ matrix.registry.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        node-version: ['22', '24']
+        registry:
+          - name: public
+            url: ''
+            scope: ''
+          - name: scoped
+            url: https://npm.pkg.github.com
+            scope: '@ezclassify'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./actions/setup-node-npm
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: ${{ matrix.registry.url }}
+          scope: ${{ matrix.registry.scope }}
+      - name: Verify the installed toolchain and registry behavior
+        env:
+          EXPECTED_NODE_MAJOR: ${{ matrix.node-version }}
+          REGISTRY_MODE: ${{ matrix.registry.name }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          const npm = (...args) => execFileSync('npm', args, { encoding: 'utf8' }).trim();
+          assert.equal(process.versions.node.split('.')[0], process.env.EXPECTED_NODE_MAJOR);
+          const version = npm('--version');
+          const [major, minor] = version.split('.').map(Number);
+          assert.equal(major, 11, 'npm must remain within the supported major');
+          assert.ok(minor >= 10, 'npm must satisfy ^11.10.0');
+          assert.equal(new URL(npm('config', 'get', 'registry')).href, 'https://registry.npmjs.org/');
+          const scoped = npm('config', 'get', '@ezclassify:registry');
+          if (process.env.REGISTRY_MODE === 'scoped') {
+            assert.equal(new URL(scoped).href, 'https://npm.pkg.github.com/');
+          } else {
+            assert.equal(scoped, 'undefined', 'unscoped setup must not add a first-party registry');
+          }
+          console.log(`Qualified Node ${process.versions.node}, npm ${version}, ${process.env.REGISTRY_MODE} registry setup`);
+          NODE
