@@ -17,3 +17,24 @@ them to any repository in the organization that does not carry its own copy.
 Issues for every EzClassify repository are tracked in
 [ezclassify/ezclassify](https://github.com/ezclassify/ezclassify), which is also
 the organization's starting point. The issue forms live there.
+
+## Shared CI lanes
+
+Consumers pin `.github/workflows/ci-policy.yml` and `ci-result.yml` at a reviewed
+full commit SHA. The policy selects one primary toolchain version for ready pull
+requests and main pushes; manual and scheduled qualification use the full
+supported matrix. Pull requests retain required validation while in draft.
+
+Repositories own their native commands, applicability decisions, dependency
+closures, and artifact identities. Every consumer's stable `ci` job joins all
+other jobs. A separate `qualification` job runs only for full qualification;
+publishers require its successful exact revision and attempt, never routine CI.
+`ci-result.yml` rejects failed, missing, cancelled, or unexpectedly skipped jobs.
+Explicit full-only and inapplicable lanes must be named by the caller.
+
+The shared workflows hold no secrets, write no source, and publish no artifacts.
+They do not install dependencies or repeat quarantine checks. Native admission
+owns each closure once; matching Node/npm setup uses `actions/setup-node-npm`.
+Callers retain workflow/ref concurrency with separate event groups for manual
+qualification. Nightly triggers remain inactive until operator approval; the
+three paused Release Train reconciliation workflows stay disabled separately.

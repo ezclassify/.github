@@ -1,0 +1,52 @@
+name: CI lane policy
+
+on:
+  workflow_call:
+    inputs:
+      primary-version:
+        description: Toolchain version used for routine change checks.
+        type: string
+        default: '22'
+      full-versions:
+        description: JSON array of supported versions for full qualification.
+        type: string
+        default: '["22","24"]'
+    outputs:
+      full:
+        value: ${{ jobs.plan.outputs.full }}
+      versions:
+        value: ${{ jobs.plan.outputs.versions }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      full: ${{ steps.profile.outputs.full }}
+      versions: ${{ steps.profile.outputs.versions }}
+    steps:
+      - name: Select the validation lane
+        id: profile
+        env:
+          PRIMARY_VERSION: ${{ inputs.primary-version }}
+          FULL_VERSIONS: ${{ inputs.full-versions }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const { PRIMARY_VERSION: primary, FULL_VERSIONS, EVENT_NAME: event } = process.env;
+          if (!['push', 'pull_request', 'workflow_dispatch', 'schedule'].includes(event)) throw new Error('Unsupported CI event');
+          if (FULL_VERSIONS.length > 256) throw new Error('Oversized version matrix');
+          const versions = JSON.parse(FULL_VERSIONS);
+          const version = value => typeof value === 'string' && /^\d+(?:\.\d+){0,2}$/.test(value);
+          if (!version(primary) || !Array.isArray(versions) || !versions.length || versions.length > 8 ||
+              !versions.every(version) || new Set(versions).size !== versions.length || !versions.includes(primary)) {
+            throw new Error('Full versions must be unique numeric versions including the primary version');
+          }
+          const full = event === 'workflow_dispatch' || event === 'schedule';
+          appendFileSync(process.env.GITHUB_OUTPUT,
+            `full=${full}\nversions=${JSON.stringify(full ? versions : [primary])}\n`);
+          NODE

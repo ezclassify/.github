@@ -1,0 +1,65 @@
+name: CI acceptance
+
+on:
+  workflow_call:
+    inputs:
+      results:
+        description: JSON of every direct dependency, including the policy job.
+        type: string
+        required: true
+      full:
+        type: boolean
+        required: true
+      full-only:
+        description: Job IDs that must be skipped in routine validation.
+        type: string
+        default: '[]'
+      optional:
+        description: Job IDs with a repository-owned applicability decision.
+        type: string
+        default: '[]'
+
+permissions:
+  contents: read
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every applicable validation result
+        env:
+          NEEDS_JSON: ${{ inputs.results }}
+          FULL: ${{ inputs.full }}
+          FULL_ONLY: ${{ inputs.full-only }}
+          OPTIONAL: ${{ inputs.optional }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          const { NEEDS_JSON, FULL, FULL_ONLY, OPTIONAL, EVENT_NAME: event } = process.env;
+          const needs = JSON.parse(NEEDS_JSON);
+          if (!needs || Array.isArray(needs) || typeof needs !== 'object') throw new Error('Missing validation results');
+          const names = Object.keys(needs);
+          if (names.length < 2 || names.length > 50 || needs.policy?.result !== 'success') throw new Error('The policy and native validation results are required');
+          const list = text => {
+            const ids = JSON.parse(text);
+            if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.some(id => id === 'policy' || !names.includes(id))) throw new Error('Unknown or duplicate conditional validation job');
+            return ids;
+          };
+          const fullOnly = list(FULL_ONLY), optional = list(OPTIONAL);
+          const full = FULL === 'true';
+          if (!['true', 'false'].includes(FULL) ||
+              full !== ['workflow_dispatch', 'schedule'].includes(event) ||
+              needs.policy.outputs?.full !== FULL) {
+            throw new Error('Acceptance profile differs from the trusted event policy');
+          }
+          for (const name of names) {
+            const result = needs[name]?.result;
+            if (name === 'policy') continue;
+            const expectedSkip = !full && fullOnly.includes(name);
+            if (expectedSkip ? result !== 'skipped' : result !== 'success' && !(optional.includes(name) && result === 'skipped')) {
+              throw new Error(`Validation did not satisfy this lane: ${name} (${result})`);
+            }
+          }
+          console.log(`Accepted ${full ? 'full qualification' : 'change checks'}`);
+          NODE
