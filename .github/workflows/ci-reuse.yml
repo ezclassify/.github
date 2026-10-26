@@ -84,3 +84,56 @@ jobs:
           }
           console.log(`Qualified Node ${process.versions.node}, npm ${version}, ${process.env.REGISTRY_MODE} registry setup`);
           NODE
+
+  dependency-admission-controls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install the isolated command recorder
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-control"
+          cat > "$RUNNER_TEMP/npm-control/npm" <<'SH'
+          #!/usr/bin/env bash
+          printf '%s\n' "$*" >> "$RUNNER_TEMP/npm-commands"
+          if [ "${REJECT_AGE:-false}" = true ] && [ "$*" = 'run check:dependency-age' ]; then exit 42; fi
+          SH
+          chmod +x "$RUNNER_TEMP/npm-control/npm"
+          echo "$RUNNER_TEMP/npm-control" >> "$GITHUB_PATH"
+      - uses: ./actions/install-node-dependencies
+      - name: A frozen closure is admitted and installed once
+        run: |
+          printf '%s\n' 'run check:lockfile-portable' 'run check:dependency-age' 'ci --no-fund --no-audit' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
+          : > "$RUNNER_TEMP/npm-commands"
+      - uses: ./actions/install-node-dependencies
+        with:
+          mode: generated
+      - name: Native relock owns admission of the generated closure
+        run: |
+          printf '%s\n' 'run deps:relock' 'ci --no-fund --no-audit' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
+          : > "$RUNNER_TEMP/npm-commands"
+      - uses: ./actions/install-node-dependencies
+        with:
+          mode: generated
+          relock-installs: 'true'
+      - name: Native install is not repeated
+        run: |
+          printf '%s\n' 'run deps:relock' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
+          : > "$RUNNER_TEMP/npm-commands"
+      - uses: ./actions/install-node-dependencies
+        id: reject
+        continue-on-error: true
+        env:
+          REJECT_AGE: 'true'
+      - name: Quarantine failure prevents installation
+        env:
+          OUTCOME: ${{ steps.reject.outcome }}
+        run: |
+          test "$OUTCOME" = failure
+          printf '%s\n' 'run check:lockfile-portable' 'run check:dependency-age' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"

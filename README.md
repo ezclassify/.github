@@ -38,3 +38,10 @@ owns each closure once; matching Node/npm setup uses `actions/setup-node-npm`.
 Callers retain workflow/ref concurrency with separate event groups for manual
 qualification. Nightly triggers remain inactive until operator approval; the
 three paused Release Train reconciliation workflows stay disabled separately.
+
+`actions/install-node-dependencies` calls the repository's native admission.
+Committed locks run portability and quarantine checks before `npm ci`; generated
+locks delegate admission to `deps:relock`. Set `relock-installs: 'true'` only when
+that native command already installs the admitted closure. Separate snapshot
+restorations keep their existing identity verification and do not resolve again.
+Registry configuration and read credentials stay scoped to the caller.

@@ -1,0 +1,36 @@
+name: Admit and install Node dependencies
+description: Run the native admission once, then install the admitted closure.
+inputs:
+  mode:
+    description: frozen for a committed lock, generated for a native deps:relock command.
+    default: frozen
+  relock-installs:
+    description: Whether the native deps:relock command already installs its admitted closure.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Validate the native installation contract
+      env:
+        LOCK_MODE: ${{ inputs.mode }}
+        RELOCK_INSTALLS: ${{ inputs.relock-installs }}
+      shell: bash
+      run: |
+        case "$LOCK_MODE:$RELOCK_INSTALLS" in
+          frozen:false|generated:false|generated:true) ;;
+          *) echo 'Unsupported dependency installation contract' >&2; exit 1 ;;
+        esac
+    - name: Admit the committed closure
+      if: inputs.mode == 'frozen'
+      shell: bash
+      run: |
+        npm run check:lockfile-portable
+        npm run check:dependency-age
+    - name: Resolve and admit the generated closure
+      if: inputs.mode == 'generated'
+      shell: bash
+      run: npm run deps:relock
+    - name: Install the admitted closure
+      if: inputs.relock-installs != 'true'
+      shell: bash
+      run: npm ci --no-fund --no-audit
