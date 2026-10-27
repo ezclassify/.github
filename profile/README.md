@@ -1,3 +1,5 @@
+![Your rules. Our engine. The classification engine for your applications.](banner.svg)
+
 # <img src="icon.svg" alt="" width="32"> EzClassify
 
 Security marking software for applications and document workflows.
