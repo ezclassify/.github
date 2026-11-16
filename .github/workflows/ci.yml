@@ -91,8 +91,11 @@ jobs:
           printf '%s\n' 'run check:lockfile-portable' 'run check:dependency-age' > "$RUNNER_TEMP/expected"
           diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
 
+      # status, not diff, so a stray untracked file also fails the check.
       - name: Working tree is clean
-        run: git diff --exit-code
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
 
   full:
     name: full (${{ matrix.node-version }}, ${{ matrix.registry.name }})
