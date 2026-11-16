@@ -1,0 +1,127 @@
+name: CI
+
+# The shared reusable workflows and composite actions in this repository are
+# consumed by other repositories, so this proves they still work. It is the
+# only required check; the matrix below runs only for a release qualification.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Also run the release-only matrix
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Exercise the lane and acceptance programs
+        run: node --test test/ci-policy.integration.mjs
+
+      - uses: ./actions/setup-node-npm
+        with:
+          node-version: '22'
+      - name: Verify the pinned npm and Node
+        env:
+          EXPECTED_NODE_MAJOR: '22'
+          REGISTRY_MODE: public
+        run: node --test test/setup-node-npm.integration.mjs
+
+      - name: Exercise the shared secret scan command
+        run: node --test test/secret-scan.integration.mjs
+
+      - name: Install the isolated command recorder
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-control"
+          cat > "$RUNNER_TEMP/npm-control/npm" <<'SH'
+          #!/usr/bin/env bash
+          printf '%s\n' "$*" >> "$RUNNER_TEMP/npm-commands"
+          if [ "${REJECT_AGE:-false}" = true ] && [ "$*" = 'run check:dependency-age' ]; then exit 42; fi
+          SH
+          chmod +x "$RUNNER_TEMP/npm-control/npm"
+          echo "$RUNNER_TEMP/npm-control" >> "$GITHUB_PATH"
+      - uses: ./actions/install-node-dependencies
+      - name: A frozen closure is admitted and installed once
+        run: |
+          printf '%s\n' 'run check:lockfile-portable' 'run check:dependency-age' 'ci --no-fund --no-audit' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
+          : > "$RUNNER_TEMP/npm-commands"
+      - uses: ./actions/install-node-dependencies
+        with:
+          mode: generated
+      - name: Native relock owns admission of the generated closure
+        run: |
+          printf '%s\n' 'run deps:relock' 'ci --no-fund --no-audit' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
+          : > "$RUNNER_TEMP/npm-commands"
+      - uses: ./actions/install-node-dependencies
+        with:
+          mode: generated
+          relock-installs: 'true'
+      - name: Native install is not repeated
+        run: |
+          printf '%s\n' 'run deps:relock' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
+          : > "$RUNNER_TEMP/npm-commands"
+      - uses: ./actions/install-node-dependencies
+        id: reject
+        continue-on-error: true
+        env:
+          REJECT_AGE: 'true'
+      - name: Quarantine failure prevents installation
+        env:
+          OUTCOME: ${{ steps.reject.outcome }}
+        run: |
+          test "$OUTCOME" = failure
+          printf '%s\n' 'run check:lockfile-portable' 'run check:dependency-age' > "$RUNNER_TEMP/expected"
+          diff -u "$RUNNER_TEMP/expected" "$RUNNER_TEMP/npm-commands"
+
+      - name: Working tree is clean
+        run: git diff --exit-code
+
+  full:
+    name: full (${{ matrix.node-version }}, ${{ matrix.registry.name }})
+    if: inputs.full
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: true
+      matrix:
+        node-version: ['22', '24']
+        registry:
+          - name: public
+            url: ''
+            scope: ''
+          - name: scoped
+            url: https://npm.pkg.github.com
+            scope: '@ezclassify'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./actions/setup-node-npm
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: ${{ matrix.registry.url }}
+          scope: ${{ matrix.registry.scope }}
+      - name: Verify the toolchain and registry behavior
+        env:
+          EXPECTED_NODE_MAJOR: ${{ matrix.node-version }}
+          REGISTRY_MODE: ${{ matrix.registry.name }}
+        run: node --test test/setup-node-npm.integration.mjs
