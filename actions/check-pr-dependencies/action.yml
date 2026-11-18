@@ -7,6 +7,9 @@ inputs:
   packages:
     description: Space-separated package names from the producer.
     default: ''
+  require-pins:
+    description: Keep true for committed pins. Set false when the caller installs and verifies disposable exact pins.
+    default: 'true'
   manifest:
     description: Package manifest containing the exact dependency pins.
     default: package.json
@@ -36,6 +39,7 @@ runs:
         DEPENDENCY_PRODUCER: ${{ inputs.producer }}
         DEPENDENCY_PACKAGES: ${{ inputs.packages }}
         DEPENDENCY_MANIFEST: ${{ inputs.manifest }}
+        DEPENDENCY_REQUIRE_PINS: ${{ inputs.require-pins }}
         DEPENDENCY_IMAGE: ${{ inputs.image }}
         DEPENDENCY_PUBLICATION_APP_ID: ${{ inputs.publication-app-id }}
         DEPENDENCY_GITHUB_TOKEN: ${{ inputs.token }}

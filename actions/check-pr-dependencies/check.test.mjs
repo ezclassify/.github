@@ -180,3 +180,12 @@ test('a native prebuilt receipt must identify the required source commit', async
   assert.equal(await resolveSnapshot({ ...options, published: () => proof(version) }), version)
   await assert.rejects(resolveSnapshot({ ...options, published: () => proof(wrong) }), /complete package snapshot/)
 })
+
+test('a cohort package pin is accepted only with proof on the exact producer squash', async () => {
+  const version = '1.0.0-dev.194.2.gdefabcdefabc'
+  const { options } = fixture({ found: (_, selector) => selector === version ? version : undefined })
+  const manifest = { dependencies: Object.fromEntries(packages.map(name => [name, version])) }
+  const pinned = { ...options, manifest, published: (_, source) => source === sha ? proof(version) : undefined }
+  assert.equal(await resolveSnapshot(pinned), version)
+  await assert.rejects(resolveSnapshot({ ...pinned, published: () => undefined }), /complete package snapshot/)
+})
