@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { resolveSnapshot } from './check.mjs'
+import { readPublicationCheck, resolveImage, resolveSnapshot } from './check.mjs'
 
 const producer = 'ezclassify/web'
 const consumer = 'ezclassify/website'
@@ -97,4 +97,37 @@ test('a verified committed pin stays usable after the moving tag changes', async
   const manifest = { dependencies: Object.fromEntries(packages.map(name => [name, pinned])) }
   assert.equal(await resolveSnapshot({ ...options, manifest }), pinned)
   assert.ok(calls.every(([, version]) => version !== 'dev-snapshot'))
+})
+
+test('registry bytes alone cannot unlock a dependency when Release Train proof is required', async () => {
+  const { options } = fixture({ found: (_, version) => version })
+  await assert.rejects(resolveSnapshot({ ...options, published: () => undefined }), /complete package snapshot/)
+  const version = snapshot(sha)
+  assert.equal(await resolveSnapshot({
+    ...options, published: () => ({ version, packages: [...packages].sort() }),
+  }), version)
+})
+
+test('a publication check must come from the designated App on the expected commit', () => {
+  const name = 'development / image / rest-api'
+  const evidence = { image: `ghcr.io/ezclassify/rest-api@sha256:${'1'.repeat(64)}` }
+  const check = { name, head_sha: sha, app: { id: 5141343 }, status: 'completed',
+    conclusion: 'success', output: { summary: JSON.stringify(evidence) } }
+  const expected = { name, sha, app: 5141343 }
+  assert.equal(readPublicationCheck({ check_runs: [{ ...check, app: { id: 12 } }] }, expected), undefined)
+  assert.equal(readPublicationCheck({ check_runs: [{ ...check, head_sha: later }] }, expected), undefined)
+  assert.equal(readPublicationCheck({ check_runs: [{ ...check, conclusion: 'failure' }] }, expected), undefined)
+  assert.deepEqual(readPublicationCheck({ check_runs: [check] }, expected), evidence)
+})
+
+test('image mode requires a published digest for the exact merge or a verified descendant', async () => {
+  const { options } = fixture()
+  const digest = `ghcr.io/ezclassify/rest-api@sha256:${'2'.repeat(64)}`
+  const args = { ...options, image: 'rest-api', mainRef: () => later, contains: () => true,
+    published(_producer, source, name) {
+      assert.equal(name, 'development / image / rest-api')
+      return { image: source === later ? digest : 'ghcr.io/ezclassify/rest-api:dev' }
+    } }
+  assert.equal(await resolveImage(args), digest)
+  await assert.rejects(resolveImage({ ...args, contains: () => false }), /waiting for Release Train/)
 })

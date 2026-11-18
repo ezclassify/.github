@@ -6,9 +6,15 @@ inputs:
     required: true
   packages:
     description: Space-separated package names from the producer.
-    required: true
+    default: ''
   version-base:
     description: Package version before the development prerelease suffix.
+    default: ''
+  image:
+    description: Development image name when checking an image instead of packages.
+    default: ''
+  publication-app-id:
+    description: Numeric GitHub App ID authorized to report Release Train publication.
     required: true
   token:
     description: Read-only GitHub token for the consumer PR and upstream PR metadata.
@@ -17,6 +23,9 @@ outputs:
   version:
     description: Exact published snapshot version, or empty when no dependency is declared.
     value: ${{ steps.resolve.outputs.version }}
+  image:
+    description: Verified immutable GHCR image reference when an image was requested.
+    value: ${{ steps.resolve.outputs.image }}
 runs:
   using: composite
   steps:
@@ -27,5 +36,7 @@ runs:
         DEPENDENCY_PRODUCER: ${{ inputs.producer }}
         DEPENDENCY_PACKAGES: ${{ inputs.packages }}
         DEPENDENCY_VERSION_BASE: ${{ inputs.version-base }}
+        DEPENDENCY_IMAGE: ${{ inputs.image }}
+        DEPENDENCY_PUBLICATION_APP_ID: ${{ inputs.publication-app-id }}
         DEPENDENCY_GITHUB_TOKEN: ${{ inputs.token }}
       run: node "$GITHUB_ACTION_PATH/check.mjs"
