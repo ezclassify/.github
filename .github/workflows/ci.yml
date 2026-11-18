@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Exercise the lane and acceptance programs
-        run: node --test test/ci-policy.integration.mjs actions/check-pr-dependencies/check.test.mjs
+        run: node --test --import ./test/fail-on-console-error.mjs test/ci-policy.integration.mjs actions/check-pr-dependencies/check.test.mjs
 
       - uses: ./actions/setup-node-npm
         with:
@@ -40,10 +40,10 @@ jobs:
         env:
           EXPECTED_NODE_MAJOR: '22'
           REGISTRY_MODE: public
-        run: node --test test/setup-node-npm.integration.mjs
+        run: node --test --import ./test/fail-on-console-error.mjs test/setup-node-npm.integration.mjs
 
       - name: Exercise the shared secret scan command
-        run: node --test test/secret-scan.integration.mjs
+        run: node --test --import ./test/fail-on-console-error.mjs test/secret-scan.integration.mjs
 
       - name: Install the isolated command recorder
         run: |
@@ -127,4 +127,4 @@ jobs:
         env:
           EXPECTED_NODE_MAJOR: ${{ matrix.node-version }}
           REGISTRY_MODE: ${{ matrix.registry.name }}
-        run: node --test test/setup-node-npm.integration.mjs
+        run: node --test --import ./test/fail-on-console-error.mjs test/setup-node-npm.integration.mjs
