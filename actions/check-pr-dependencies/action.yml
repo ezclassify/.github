@@ -7,9 +7,6 @@ inputs:
   packages:
     description: Space-separated package names from the producer.
     default: ''
-  version-base:
-    description: Package version before the development prerelease suffix.
-    default: ''
   image:
     description: Development image name when checking an image instead of packages.
     default: ''
@@ -35,7 +32,6 @@ runs:
       env:
         DEPENDENCY_PRODUCER: ${{ inputs.producer }}
         DEPENDENCY_PACKAGES: ${{ inputs.packages }}
-        DEPENDENCY_VERSION_BASE: ${{ inputs.version-base }}
         DEPENDENCY_IMAGE: ${{ inputs.image }}
         DEPENDENCY_PUBLICATION_APP_ID: ${{ inputs.publication-app-id }}
         DEPENDENCY_GITHUB_TOKEN: ${{ inputs.token }}
