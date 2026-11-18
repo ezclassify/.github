@@ -7,7 +7,8 @@ const consumer = 'ezclassify/website'
 const sha = 'a'.repeat(40)
 const later = 'b'.repeat(40)
 const packages = ['@ezclassify/ui', '@ezclassify/react']
-const snapshot = source => `1.0.0-dev.snapshot.g${source}`
+const snapshot = (source, base = '1.0.0') => `${base}-dev.snapshot.g${source}.r123.1`
+const proof = version => ({ version, packages: [...packages].sort() })
 
 function fixture({ body = `Depends-on: https://github.com/${producer}/pull/26`, merged = true, found = () => undefined, contains = () => false, head = 'pr-head' } = {}) {
   const calls = []
@@ -18,7 +19,6 @@ function fixture({ body = `Depends-on: https://github.com/${producer}/pull/26`, 
       consumer,
       producer,
       packages,
-      base: '1.0.0',
       async readPull(repo, number) {
         calls.push([repo, number])
         return repo === consumer
@@ -30,6 +30,7 @@ function fixture({ body = `Depends-on: https://github.com/${producer}/pull/26`, 
         return found(name, version)
       },
       contains,
+      published: (_producer, source) => proof(snapshot(source)),
     },
   }
 }
@@ -106,6 +107,22 @@ test('registry bytes alone cannot unlock a dependency when Release Train proof i
   assert.equal(await resolveSnapshot({
     ...options, published: () => ({ version, packages: [...packages].sort() }),
   }), version)
+})
+
+test('the trusted producer version can change without a consumer workflow setting', async () => {
+  const publishedVersion = snapshot(sha, '2.3.4')
+  const { options, calls } = fixture({ found: (_, version) => version === publishedVersion ? version : undefined })
+  const manifest = { dependencies: Object.fromEntries(packages.map(name => [name, '^1.0.0-0'])) }
+  const published = () => proof(publishedVersion)
+  await assert.rejects(resolveSnapshot({ ...options, manifest, published }), new RegExp(`to ${publishedVersion}`))
+  for (const name of packages) manifest.dependencies[name] = publishedVersion
+  assert.equal(await resolveSnapshot({ ...options, manifest, published }), publishedVersion)
+  assert.ok(calls.some(([, version]) => version === publishedVersion))
+})
+
+test('a trusted check on the squash commit cannot point at a different source version', async () => {
+  const { options } = fixture({ found: (_, version) => version === 'dev-snapshot' ? undefined : version })
+  await assert.rejects(resolveSnapshot({ ...options, published: () => proof(snapshot(later, '2.3.4')) }), /complete package snapshot/)
 })
 
 test('a publication check must come from the designated App on the expected commit', () => {

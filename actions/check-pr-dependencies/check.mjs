@@ -6,6 +6,8 @@ const reference = /^(?:https:\/\/github\.com\/(?<urlRepo>[\w.-]+\/[\w.-]+)\/pull
 const registry = 'https://npm.pkg.github.com'
 const slug = /^[\w.-]+\/[\w.-]+$/
 const shaFormat = /^[0-9a-f]{40}$/
+const snapshotFormat = /^\d+\.\d+\.\d+-dev\.snapshot\.g([0-9a-f]{40})\.r[1-9]\d*\.[1-9]\d*$/
+const snapshotSource = version => typeof version === 'string' ? snapshotFormat.exec(version)?.[1] : undefined
 
 async function mergedDependency({ event, consumer, producer, readPull }) {
   if (!event.pull_request) return ''
@@ -34,37 +36,30 @@ async function mergedDependency({ event, consumer, producer, readPull }) {
   return { label, sha }
 }
 
-export async function resolveSnapshot({ packages, base, packageVersion, contains, manifest, published, ...identity }) {
+export async function resolveSnapshot({ packages, packageVersion, contains, manifest, published, ...identity }) {
   const merged = await mergedDependency(identity)
   if (!merged) return ''
   const { label, sha } = merged
   const { producer } = identity
-  if (!/^\d+\.\d+\.\d+$/.test(base) ||
-      packages.length === 0 || packages.some(name => !/^@ezclassify\/[a-z0-9-]+$/.test(name))) {
+  if (packages.length === 0 || packages.some(name => !/^@ezclassify\/[a-z0-9-]+$/.test(name))) {
     throw new Error('Invalid snapshot dependency configuration.')
   }
-  const prefix = `${base}-dev.snapshot.g`
-  const sourceOf = version => {
-    const source = typeof version === 'string' && version.startsWith(prefix) ? version.slice(prefix.length) : ''
-    return /^([0-9a-f]{40})(?:\.r[1-9]\d*\.[1-9]\d*)?$/.exec(source)?.[1] ?? ''
-  }
-  const available = version => packages.every(name => packageVersion(name, version) === version)
+  const check = 'development / packages'
+  const expectedPackages = JSON.stringify([...packages].sort())
+  const complete = (version, proof) => proof?.version === version &&
+    JSON.stringify(proof.packages) === expectedPackages &&
+    packages.every(name => packageVersion(name, version) === version)
   const qualifies = async version => {
-    const source = sourceOf(version)
+    const source = snapshotSource(version)
     if (!source || (source !== sha && !await contains(producer, sha, source))) return false
-    if (published) {
-      const proof = await published(producer, source, 'development / packages', version)
-      if (proof?.version !== version || JSON.stringify(proof.packages) !== JSON.stringify([...packages].sort())) return false
-    }
-    return available(version)
+    return complete(version, await published(producer, source, check, version))
   }
   const pins = packages.map(name => manifest?.dependencies?.[name])
   let version = pins.every(pin => pin === pins[0]) && await qualifies(pins[0]) ? pins[0] : ''
   if (!version) {
-    const exact = published
-      ? (await published(producer, sha, 'development / packages'))?.version
-      : `${prefix}${sha}`
-    if (sourceOf(exact) === sha && await qualifies(exact)) version = exact
+    const proof = await published(producer, sha, check)
+    const exact = proof?.version
+    if (snapshotSource(exact) === sha && complete(exact, proof)) version = exact
   }
   if (!version) {
     // A later snapshot can contain a merge from before the publisher was enabled.
@@ -166,7 +161,6 @@ async function main() {
     ...identity,
     manifest: JSON.parse(readFileSync('package.json', 'utf8')),
     packages: env.DEPENDENCY_PACKAGES.trim().split(/\s+/).filter(Boolean),
-    base: env.DEPENDENCY_VERSION_BASE,
     packageVersion(name, version) {
       try {
         const result = execFileSync('npm', [
