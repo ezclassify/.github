@@ -8,12 +8,13 @@ const slug = /^[\w.-]+\/[\w.-]+$/
 const shaFormat = /^[0-9a-f]{40}$/
 const snapshotFormat = /^\d+\.\d+\.\d+-dev\.snapshot\.g([0-9a-f]{40})\.r[1-9]\d*\.[1-9]\d*$/
 const snapshotSource = version => typeof version === 'string' ? snapshotFormat.exec(version)?.[1] : undefined
+const cohortFormat = /^\d+\.\d+\.\d+-dev\.[1-9]\d*\.[1-9]\d*\.g[0-9a-f]{12}$/
 const mirrorFormat = /^\d+\.\d+\.\d+-mirror\.[1-9]\d*\.[1-9]\d*$/
 const prebuiltFormat = /^\d+\.\d+\.\d+-prebuilt\.[1-9]\d*(?:\.[1-9]\d*)?\.g([a-f0-9]{12})$/
 
 function versionMatchesSource(version, sha) {
   return typeof version === 'string' && (snapshotSource(version) === sha ||
-    mirrorFormat.test(version) || prebuiltFormat.exec(version)?.[1] === sha.slice(0, 12))
+    cohortFormat.test(version) || mirrorFormat.test(version) || prebuiltFormat.exec(version)?.[1] === sha.slice(0, 12))
 }
 
 async function mergedDependency({ event, consumer, producer, readPull }) {
@@ -167,7 +168,7 @@ async function main() {
   const version = await resolveSnapshot({
     ...identity,
     manifestPath,
-    manifest: JSON.parse(readFileSync(manifestPath, 'utf8')),
+    manifest: env.DEPENDENCY_REQUIRE_PINS === 'false' ? undefined : JSON.parse(readFileSync(manifestPath, 'utf8')),
     packages: env.DEPENDENCY_PACKAGES.trim().split(/\s+/).filter(Boolean),
     packageVersion(name, version) {
       try {
