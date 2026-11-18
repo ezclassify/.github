@@ -7,6 +7,9 @@ inputs:
   packages:
     description: Space-separated package names from the producer.
     default: ''
+  manifest:
+    description: Package manifest containing the exact dependency pins.
+    default: package.json
   image:
     description: Development image name when checking an image instead of packages.
     default: ''
@@ -32,6 +35,7 @@ runs:
       env:
         DEPENDENCY_PRODUCER: ${{ inputs.producer }}
         DEPENDENCY_PACKAGES: ${{ inputs.packages }}
+        DEPENDENCY_MANIFEST: ${{ inputs.manifest }}
         DEPENDENCY_IMAGE: ${{ inputs.image }}
         DEPENDENCY_PUBLICATION_APP_ID: ${{ inputs.publication-app-id }}
         DEPENDENCY_GITHUB_TOKEN: ${{ inputs.token }}
