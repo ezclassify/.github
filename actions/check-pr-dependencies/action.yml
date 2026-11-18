@@ -1,0 +1,31 @@
+name: Check upstream PR dependencies
+description: Check that declared upstream changes have published and the consumer pins those snapshots.
+inputs:
+  producer:
+    description: Official owner/repository for the supported package dependency.
+    required: true
+  packages:
+    description: Space-separated package names from the producer.
+    required: true
+  version-base:
+    description: Package version before the development prerelease suffix.
+    required: true
+  token:
+    description: Read-only GitHub token for the consumer PR and upstream PR metadata.
+    required: true
+outputs:
+  version:
+    description: Exact published snapshot version, or empty when no dependency is declared.
+    value: ${{ steps.resolve.outputs.version }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve declared upstream snapshot
+      id: resolve
+      shell: bash
+      env:
+        DEPENDENCY_PRODUCER: ${{ inputs.producer }}
+        DEPENDENCY_PACKAGES: ${{ inputs.packages }}
+        DEPENDENCY_VERSION_BASE: ${{ inputs.version-base }}
+        DEPENDENCY_GITHUB_TOKEN: ${{ inputs.token }}
+      run: node "$GITHUB_ACTION_PATH/check.mjs"
