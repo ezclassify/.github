@@ -5,8 +5,9 @@ import { pathToFileURL } from 'node:url'
 const reference = /^(?:https:\/\/github\.com\/(?<urlRepo>[\w.-]+\/[\w.-]+)\/pull\/(?<urlNumber>[1-9]\d*)|(?<shortRepo>[\w.-]+\/[\w.-]+)#(?<shortNumber>[1-9]\d*))$/i
 const registry = 'https://npm.pkg.github.com'
 const slug = /^[\w.-]+\/[\w.-]+$/
+const shaFormat = /^[0-9a-f]{40}$/
 
-export async function resolveSnapshot({ event, consumer, producer, packages, base, readPull, packageVersion, contains, manifest }) {
+async function mergedDependency({ event, consumer, producer, readPull }) {
   if (!event.pull_request) return ''
   const current = await readPull(consumer, event.number)
   if (current.state !== 'open' || current.head?.sha !== event.pull_request.head.sha) {
@@ -14,10 +15,7 @@ export async function resolveSnapshot({ event, consumer, producer, packages, bas
   }
   const declarations = (current.body ?? '').split(/\r?\n/).filter(line => /^Depends-on\s*:/i.test(line.trim()))
   if (declarations.length === 0) return ''
-  if (!slug.test(producer) || !/^\d+\.\d+\.\d+$/.test(base) ||
-      packages.length === 0 || packages.some(name => !/^@ezclassify\/[a-z0-9-]+$/.test(name))) {
-    throw new Error('Invalid snapshot dependency configuration.')
-  }
+  if (!slug.test(producer)) throw new Error('Invalid producer identity.')
   if (declarations.length !== 1) throw new Error('This CI workflow supports one upstream snapshot dependency.')
   const value = declarations[0].trim().replace(/^Depends-on\s*:\s*/i, '').trim()
   const match = reference.exec(value)
@@ -32,22 +30,41 @@ export async function resolveSnapshot({ event, consumer, producer, packages, bas
     throw new Error(`Blocked: waiting for ${label} to merge into official main.`)
   }
   const sha = pull.merge_commit_sha
-  if (!/^[0-9a-f]{40}$/.test(sha ?? '')) throw new Error(`GitHub did not return a merge commit for ${label}.`)
+  if (!shaFormat.test(sha ?? '')) throw new Error(`GitHub did not return a merge commit for ${label}.`)
+  return { label, sha }
+}
+
+export async function resolveSnapshot({ packages, base, packageVersion, contains, manifest, published, ...identity }) {
+  const merged = await mergedDependency(identity)
+  if (!merged) return ''
+  const { label, sha } = merged
+  const { producer } = identity
+  if (!/^\d+\.\d+\.\d+$/.test(base) ||
+      packages.length === 0 || packages.some(name => !/^@ezclassify\/[a-z0-9-]+$/.test(name))) {
+    throw new Error('Invalid snapshot dependency configuration.')
+  }
   const prefix = `${base}-dev.snapshot.g`
   const sourceOf = version => {
     const source = typeof version === 'string' && version.startsWith(prefix) ? version.slice(prefix.length) : ''
-    return /^[0-9a-f]{40}$/.test(source) ? source : ''
+    return /^([0-9a-f]{40})(?:\.r[1-9]\d*\.[1-9]\d*)?$/.exec(source)?.[1] ?? ''
   }
   const available = version => packages.every(name => packageVersion(name, version) === version)
   const qualifies = async version => {
     const source = sourceOf(version)
-    return source && (source === sha || await contains(producer, sha, source)) && available(version)
+    if (!source || (source !== sha && !await contains(producer, sha, source))) return false
+    if (published) {
+      const proof = await published(producer, source, 'development / packages', version)
+      if (proof?.version !== version || JSON.stringify(proof.packages) !== JSON.stringify([...packages].sort())) return false
+    }
+    return available(version)
   }
   const pins = packages.map(name => manifest?.dependencies?.[name])
   let version = pins.every(pin => pin === pins[0]) && await qualifies(pins[0]) ? pins[0] : ''
   if (!version) {
-    const exact = `${prefix}${sha}`
-    if (available(exact)) version = exact
+    const exact = published
+      ? (await published(producer, sha, 'development / packages'))?.version
+      : `${prefix}${sha}`
+    if (sourceOf(exact) === sha && await qualifies(exact)) version = exact
   }
   if (!version) {
     // A later snapshot can contain a merge from before the publisher was enabled.
@@ -64,6 +81,42 @@ export async function resolveSnapshot({ event, consumer, producer, packages, bas
   return version
 }
 
+export async function resolveImage({ image, published, mainRef, contains, ...identity }) {
+  const merged = await mergedDependency(identity)
+  if (!merged) return ''
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(image)) throw new Error('Invalid development image name.')
+  const { producer } = identity
+  const check = `development / image / ${image}`
+  const ref = new RegExp(`^ghcr\\.io/ezclassify/${image}@sha256:[0-9a-f]{64}$`)
+  const find = async sha => {
+    const proof = await published(producer, sha, check)
+    return ref.test(proof?.image ?? '') ? proof.image : ''
+  }
+  const exact = await find(merged.sha)
+  if (exact) return exact
+  const main = await mainRef(producer)
+  if (shaFormat.test(main) && main !== merged.sha && await contains(producer, merged.sha, main)) {
+    const current = await find(main)
+    if (current) return current
+  }
+  throw new Error(`Blocked: waiting for Release Train to publish ${image} containing ${merged.label} (${merged.sha}).`)
+}
+
+export function readPublicationCheck(list, { sha, name, app, version }) {
+  const runs = list.check_runs ?? []
+  for (const check of runs) {
+    if (check.name !== name || check.head_sha !== sha || check.app?.id !== app ||
+        check.status !== 'completed' || check.conclusion !== 'success') continue
+    let proof
+    try {
+      proof = JSON.parse(check.output.summary)
+    } catch {
+      throw new Error('Malformed development publication check.')
+    }
+    if (!version || proof?.version === version) return proof
+  }
+}
+
 async function main() {
   const env = process.env
   const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'))
@@ -76,13 +129,11 @@ async function main() {
     if (!response.ok) throw new Error(`GitHub lookup failed for ${path} (HTTP ${response.status}).`)
     return response.json()
   }
-  const version = await resolveSnapshot({
+  const app = Number(env.DEPENDENCY_PUBLICATION_APP_ID)
+  const identity = {
     event,
-    manifest: JSON.parse(readFileSync('package.json', 'utf8')),
     consumer: env.GITHUB_REPOSITORY,
     producer: env.DEPENDENCY_PRODUCER,
-    packages: env.DEPENDENCY_PACKAGES.trim().split(/\s+/).filter(Boolean),
-    base: env.DEPENDENCY_VERSION_BASE,
     async readPull(repo, number) {
       if (!slug.test(repo) || !/^[1-9]\d*$/.test(String(number))) throw new Error('Invalid pull request identity.')
       return github(`/repos/${repo}/pulls/${number}`)
@@ -91,6 +142,31 @@ async function main() {
       const comparison = await github(`/repos/${repo}/compare/${required}...${snapshot}`)
       return comparison.status === 'ahead' || comparison.status === 'identical'
     },
+    async published(repo, sha, name, version) {
+      if (!Number.isSafeInteger(app) || app <= 0) throw new Error('The Release Train publication App ID is required.')
+      const query = new URLSearchParams({ check_name: name, app_id: String(app), filter: version ? 'all' : 'latest', per_page: '100' })
+      const result = await github(`/repos/${repo}/commits/${sha}/check-runs?${query}`)
+      return readPublicationCheck(result, { sha, name, app, version })
+    },
+  }
+  const imageName = env.DEPENDENCY_IMAGE
+  if (imageName) {
+    const image = await resolveImage({
+      ...identity,
+      image: imageName,
+      async mainRef(repo) {
+        const ref = await github(`/repos/${repo}/git/ref/heads/main`)
+        return ref.object?.sha ?? ''
+      },
+    })
+    appendFileSync(env.GITHUB_OUTPUT, `image=${image}\n`)
+    return
+  }
+  const version = await resolveSnapshot({
+    ...identity,
+    manifest: JSON.parse(readFileSync('package.json', 'utf8')),
+    packages: env.DEPENDENCY_PACKAGES.trim().split(/\s+/).filter(Boolean),
+    base: env.DEPENDENCY_VERSION_BASE,
     packageVersion(name, version) {
       try {
         const result = execFileSync('npm', [
