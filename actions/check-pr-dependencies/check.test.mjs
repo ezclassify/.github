@@ -157,3 +157,26 @@ test('image mode requires a published digest for the exact merge or a verified d
   assert.equal(await resolveImage(args), digest)
   await assert.rejects(resolveImage({ ...args, contains: () => false }), /waiting for Release Train/)
 })
+
+test('a native mirror proof on the squash commit can cover a consumer subset', async () => {
+  const version = '1.0.0-mirror.42.1'
+  const { options } = fixture({ found: (_, candidate) => candidate === version ? version : undefined })
+  const manifest = { dependencies: { [packages[0]]: version } }
+  const published = (_, source) => {
+    assert.equal(source, sha)
+    return proof(version)
+  }
+  const candidate = { ...options, packages: [packages[0]], manifest, published }
+  assert.equal(await resolveSnapshot(candidate), version)
+  await assert.rejects(resolveSnapshot({ ...candidate, published: () => ({
+    version, packages: [packages[1]],
+  }) }), /complete package snapshot/)
+})
+
+test('a native prebuilt receipt must identify the required source commit', async () => {
+  const version = `1.0.0-prebuilt.42.1.g${sha.slice(0, 12)}`
+  const wrong = `1.0.0-prebuilt.42.1.g${later.slice(0, 12)}`
+  const { options } = fixture({ found: (_, candidate) => candidate === 'dev-snapshot' ? undefined : candidate })
+  assert.equal(await resolveSnapshot({ ...options, published: () => proof(version) }), version)
+  await assert.rejects(resolveSnapshot({ ...options, published: () => proof(wrong) }), /complete package snapshot/)
+})

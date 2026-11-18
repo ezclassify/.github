@@ -8,6 +8,13 @@ const slug = /^[\w.-]+\/[\w.-]+$/
 const shaFormat = /^[0-9a-f]{40}$/
 const snapshotFormat = /^\d+\.\d+\.\d+-dev\.snapshot\.g([0-9a-f]{40})\.r[1-9]\d*\.[1-9]\d*$/
 const snapshotSource = version => typeof version === 'string' ? snapshotFormat.exec(version)?.[1] : undefined
+const mirrorFormat = /^\d+\.\d+\.\d+-mirror\.[1-9]\d*\.[1-9]\d*$/
+const prebuiltFormat = /^\d+\.\d+\.\d+-prebuilt\.[1-9]\d*(?:\.[1-9]\d*)?\.g([a-f0-9]{12})$/
+
+function versionMatchesSource(version, sha) {
+  return typeof version === 'string' && (snapshotSource(version) === sha ||
+    mirrorFormat.test(version) || prebuiltFormat.exec(version)?.[1] === sha.slice(0, 12))
+}
 
 async function mergedDependency({ event, consumer, producer, readPull }) {
   if (!event.pull_request) return ''
@@ -45,13 +52,12 @@ export async function resolveSnapshot({ packages, packageVersion, contains, mani
     throw new Error('Invalid snapshot dependency configuration.')
   }
   const check = 'development / packages'
-  const expectedPackages = JSON.stringify([...packages].sort())
   const complete = (version, proof) => proof?.version === version &&
-    JSON.stringify(proof.packages) === expectedPackages &&
+    Array.isArray(proof.packages) && packages.every(name => proof.packages.includes(name)) &&
     packages.every(name => packageVersion(name, version) === version)
   const qualifies = async version => {
-    const source = snapshotSource(version)
-    if (!source || (source !== sha && !await contains(producer, sha, source))) return false
+    const source = snapshotSource(version) ?? sha
+    if (!versionMatchesSource(version, source) || (source !== sha && !await contains(producer, sha, source))) return false
     return complete(version, await published(producer, source, check, version))
   }
   const pins = packages.map(name => manifest?.dependencies?.[name] ?? manifest?.devDependencies?.[name])
@@ -59,18 +65,18 @@ export async function resolveSnapshot({ packages, packageVersion, contains, mani
   if (!version) {
     const proof = await published(producer, sha, check)
     const exact = proof?.version
-    if (snapshotSource(exact) === sha && complete(exact, proof)) version = exact
+    if (versionMatchesSource(exact, sha) && complete(exact, proof)) version = exact
   }
   if (!version) {
     // A later snapshot can contain a merge from before the publisher was enabled.
     const candidate = packageVersion(packages[0], 'dev-snapshot')
-    if (await qualifies(candidate)) version = candidate
+    if (snapshotSource(candidate) && await qualifies(candidate)) version = candidate
   }
   if (!version) {
     throw new Error(`Blocked: waiting for a complete package snapshot containing ${label} (${sha}). Rerun after publication.`)
   }
   if (manifest && pins.some(pin => pin !== version)) {
-    throw new Error(`Pin ${packages.join(' and ')} to ${version} in package.json, then push the downstream PR.`)
+    throw new Error(`Pin ${packages.join(' and ')} to ${version} in ${identity.manifestPath ?? 'package.json'}, then push the downstream PR.`)
   }
   console.log(`Resolved ${label} to ${version} for ${packages.join(', ')}.`)
   return version
@@ -157,9 +163,11 @@ async function main() {
     appendFileSync(env.GITHUB_OUTPUT, `image=${image}\n`)
     return
   }
+  const manifestPath = env.DEPENDENCY_MANIFEST || 'package.json'
   const version = await resolveSnapshot({
     ...identity,
-    manifest: JSON.parse(readFileSync('package.json', 'utf8')),
+    manifestPath,
+    manifest: JSON.parse(readFileSync(manifestPath, 'utf8')),
     packages: env.DEPENDENCY_PACKAGES.trim().split(/\s+/).filter(Boolean),
     packageVersion(name, version) {
       try {
