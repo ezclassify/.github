@@ -54,7 +54,7 @@ export async function resolveSnapshot({ packages, packageVersion, contains, mani
     if (!source || (source !== sha && !await contains(producer, sha, source))) return false
     return complete(version, await published(producer, source, check, version))
   }
-  const pins = packages.map(name => manifest?.dependencies?.[name])
+  const pins = packages.map(name => manifest?.dependencies?.[name] ?? manifest?.devDependencies?.[name])
   let version = pins.every(pin => pin === pins[0]) && await qualifies(pins[0]) ? pins[0] : ''
   if (!version) {
     const proof = await published(producer, sha, check)

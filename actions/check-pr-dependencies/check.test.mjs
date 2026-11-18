@@ -89,6 +89,15 @@ test('an available snapshot must be pinned so later builds use the tested versio
   assert.equal(await resolveSnapshot({ ...options, manifest }), snapshot(sha))
 })
 
+test('a private workspace root can pin a published snapshot in devDependencies', async () => {
+  const version = snapshot(sha)
+  const { options } = fixture({ found: (_, selector) => selector === version ? version : undefined })
+  const manifest = { devDependencies: Object.fromEntries(packages.map(name => [name, version])) }
+  assert.equal(await resolveSnapshot({ ...options, manifest }), version)
+  manifest.devDependencies[packages[0]] = '^1.0.0-0'
+  await assert.rejects(resolveSnapshot({ ...options, manifest }), /Pin @ezclassify\/ui and @ezclassify\/react/)
+})
+
 test('a verified committed pin stays usable after the moving tag changes', async () => {
   const pinned = snapshot(later)
   const { options, calls } = fixture({
