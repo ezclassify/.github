@@ -17,31 +17,49 @@ function versionMatchesSource(version, sha) {
     cohortFormat.test(version) || mirrorFormat.test(version) || prebuiltFormat.exec(version)?.[1] === sha.slice(0, 12))
 }
 
-async function mergedDependency({ event, consumer, producer, readPull }) {
-  if (!event.pull_request) return ''
+export async function requireMergedDependencies({ event, consumer, producer, readPull }) {
+  if (!event.pull_request) return []
   const current = await readPull(consumer, event.number)
   if (current.state !== 'open' || current.head?.sha !== event.pull_request.head.sha) {
     throw new Error('This run belongs to an older PR revision. Check the current PR run.')
   }
   const declarations = (current.body ?? '').split(/\r?\n/).filter(line => /^Depends-on\s*:/i.test(line.trim()))
-  if (declarations.length === 0) return ''
-  if (!slug.test(producer)) throw new Error('Invalid producer identity.')
-  if (declarations.length !== 1) throw new Error('This CI workflow supports one upstream snapshot dependency.')
-  const value = declarations[0].trim().replace(/^Depends-on\s*:\s*/i, '').trim()
-  const match = reference.exec(value)
-  const upstream = match?.groups.urlRepo ?? match?.groups.shortRepo
-  const number = match?.groups.urlNumber ?? match?.groups.shortNumber
-  if (upstream?.toLowerCase() !== producer.toLowerCase()) {
-    throw new Error(`Use Depends-on: ${producer}#<PR number> for this workflow.`)
+  if (producer && declarations.length > 1) {
+    throw new Error('This CI workflow supports one upstream snapshot dependency.')
   }
-  const label = `${producer}#${number}`
-  const pull = await readPull(producer, number)
-  if (pull.merged !== true || pull.base?.ref !== 'main' || pull.base?.repo?.full_name?.toLowerCase() !== producer.toLowerCase()) {
-    throw new Error(`Blocked: waiting for ${label} to merge into official main.`)
+  const merged = new Map()
+  for (const declaration of declarations) {
+    const value = declaration.trim().replace(/^Depends-on\s*:\s*/i, '').trim()
+    const match = reference.exec(value)
+    const repo = (match?.groups.urlRepo ?? match?.groups.shortRepo)?.toLowerCase()
+    const number = match?.groups.urlNumber ?? match?.groups.shortNumber
+    if (!/^ezclassify\/[\w.-]*\w[\w.-]*$/.test(repo ?? '')) {
+      throw new Error('Use Depends-on: ezclassify/<repository>#<PR number> or its GitHub URL.')
+    }
+    if (producer && repo !== producer.toLowerCase()) {
+      throw new Error(`Use Depends-on: ${producer}#<PR number> for this workflow.`)
+    }
+    const label = `${repo}#${number}`
+    if (repo === consumer.toLowerCase() && number === String(event.number)) {
+      throw new Error('A pull request cannot depend on itself.')
+    }
+    if (merged.has(label)) continue
+    const pull = await readPull(repo, number)
+    if (pull.merged !== true || pull.base?.ref !== 'main' || pull.base?.repo?.full_name?.toLowerCase() !== repo) {
+      throw new Error(`Blocked: waiting for ${label} to merge into official main.`)
+    }
+    const sha = pull.merge_commit_sha
+    if (!shaFormat.test(sha ?? '')) throw new Error(`GitHub did not return a merge commit for ${label}.`)
+    merged.set(label, { repo, label, sha })
   }
-  const sha = pull.merge_commit_sha
-  if (!shaFormat.test(sha ?? '')) throw new Error(`GitHub did not return a merge commit for ${label}.`)
-  return { label, sha }
+  return [...merged.values()]
+}
+
+async function mergedDependency(identity) {
+  const { producer } = identity
+  if (!slug.test(producer ?? '')) throw new Error('Invalid producer identity.')
+  const [merged] = await requireMergedDependencies(identity)
+  return merged
 }
 
 export async function resolveSnapshot({ packages, packageVersion, contains, manifest, published, ...identity }) {
@@ -122,9 +140,10 @@ export function readPublicationCheck(list, { sha, name, app, version }) {
 async function main() {
   const env = process.env
   const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'))
-  async function github(path) {
+  const upstreamToken = env.DEPENDENCY_UPSTREAM_TOKEN || env.DEPENDENCY_GITHUB_TOKEN
+  async function github(path, token = env.DEPENDENCY_GITHUB_TOKEN) {
     const response = await fetch(`https://api.github.com${path}`, {
-      headers: { authorization: `Bearer ${env.DEPENDENCY_GITHUB_TOKEN}`, accept: 'application/vnd.github+json' },
+      headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' },
       redirect: 'error',
       signal: AbortSignal.timeout(10_000),
     })
@@ -138,18 +157,23 @@ async function main() {
     producer: env.DEPENDENCY_PRODUCER,
     async readPull(repo, number) {
       if (!slug.test(repo) || !/^[1-9]\d*$/.test(String(number))) throw new Error('Invalid pull request identity.')
-      return github(`/repos/${repo}/pulls/${number}`)
+      return github(`/repos/${repo}/pulls/${number}`, repo.toLowerCase() === env.GITHUB_REPOSITORY.toLowerCase()
+        ? env.DEPENDENCY_GITHUB_TOKEN : upstreamToken)
     },
     async contains(repo, required, snapshot) {
-      const comparison = await github(`/repos/${repo}/compare/${required}...${snapshot}`)
+      const comparison = await github(`/repos/${repo}/compare/${required}...${snapshot}`, upstreamToken)
       return comparison.status === 'ahead' || comparison.status === 'identical'
     },
     async published(repo, sha, name, version) {
       if (!Number.isSafeInteger(app) || app <= 0) throw new Error('The Release Train publication App ID is required.')
       const query = new URLSearchParams({ check_name: name, app_id: String(app), filter: version ? 'all' : 'latest', per_page: '100' })
-      const result = await github(`/repos/${repo}/commits/${sha}/check-runs?${query}`)
+      const result = await github(`/repos/${repo}/commits/${sha}/check-runs?${query}`, upstreamToken)
       return readPublicationCheck(result, { sha, name, app, version })
     },
+  }
+  if (!identity.producer) {
+    await requireMergedDependencies(identity)
+    return
   }
   const imageName = env.DEPENDENCY_IMAGE
   if (imageName) {
@@ -157,7 +181,7 @@ async function main() {
       ...identity,
       image: imageName,
       async mainRef(repo) {
-        const ref = await github(`/repos/${repo}/git/ref/heads/main`)
+        const ref = await github(`/repos/${repo}/git/ref/heads/main`, upstreamToken)
         return ref.object?.sha ?? ''
       },
     })

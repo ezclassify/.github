@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
 
       - name: Exercise the lane and acceptance programs
-        run: node --test --import ./test/fail-on-console-error.mjs test/ci-policy.integration.mjs actions/check-pr-dependencies/check.test.mjs
+        run: node --test --import ./test/fail-on-console-error.mjs test/ci-policy.integration.mjs actions/check-pr-dependencies/*.test.mjs
 
       - uses: ./actions/setup-node-npm
         with:

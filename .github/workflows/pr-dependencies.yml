@@ -1,0 +1,58 @@
+name: Trusted PR dependency metadata
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  workflow_call:
+    secrets:
+      EZ_PR_DEPENDENCY_APP_PRIVATE_KEY:
+        required: false
+
+permissions:
+  checks: write
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-dependencies-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dependency:
+    if: github.event_name == 'pull_request_target' && github.repository_owner == 'ezclassify'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DEPENDENCY_CHECK_TOKEN: ${{ github.token }}
+      HAS_READER_KEY: ${{ secrets.EZ_PR_DEPENDENCY_APP_PRIVATE_KEY != '' }}
+    steps:
+      - name: Check out the trusted workflow source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Start the dependency check on the PR head
+        id: start
+        run: node actions/check-pr-dependencies/required.mjs start
+      - name: Mint a private PR metadata reader
+        id: reader
+        if: github.event.pull_request.base.repo.private && env.HAS_READER_KEY == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.EZ_PR_DEPENDENCY_APP_ID }}
+          private-key: ${{ secrets.EZ_PR_DEPENDENCY_APP_PRIVATE_KEY }}
+          owner: ezclassify
+          permission-pull-requests: read
+      - name: Verify declared upstream merges
+        id: verify
+        env:
+          DEPENDENCY_CHECK_ID: ${{ steps.start.outputs.check-id }}
+          DEPENDENCY_UPSTREAM_TOKEN: ${{ steps.reader.outputs.token }}
+        run: node actions/check-pr-dependencies/required.mjs verify
+      - name: Finalize an incomplete failed check
+        if: failure() && steps.start.outputs.check-id != ''
+        env:
+          DEPENDENCY_CHECK_ID: ${{ steps.start.outputs.check-id }}
+        run: node actions/check-pr-dependencies/required.mjs fail

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { readPublicationCheck, resolveImage, resolveSnapshot } from './check.mjs'
+import { readPublicationCheck, requireMergedDependencies, resolveImage, resolveSnapshot } from './check.mjs'
 
 const producer = 'ezclassify/web'
 const consumer = 'ezclassify/website'
@@ -45,6 +45,50 @@ test('an open upstream PR blocks before any registry work', async () => {
   const { options, calls } = fixture({ merged: false })
   await assert.rejects(resolveSnapshot(options), /waiting for ezclassify\/web#26 to merge/)
   assert.deepEqual(calls, [[consumer, 32], [producer, '26']])
+})
+
+test('merge-only checks all declarations and deduplicates URL and shorthand references', async () => {
+  const calls = []
+  const options = {
+    consumer: 'ezclassify/release-train',
+    event: { number: 57, pull_request: { head: { sha } } },
+    async readPull(repo, number) {
+      calls.push([repo, number])
+      if (repo === options.consumer) {
+        return { state: 'open', head: { sha }, body: [
+          'Depends-on: ezclassify/orchestration#16',
+          'depends-on: https://github.com/ezclassify/.github/pull/42',
+          'Depends-on: https://github.com/EzClassify/Orchestration/pull/16',
+        ].join('\n') }
+      }
+      return { merged: true, merge_commit_sha: sha, base: { ref: 'main', repo: { full_name: repo } } }
+    },
+  }
+  assert.deepEqual((await requireMergedDependencies(options)).map(({ label }) => label), [
+    'ezclassify/orchestration#16', 'ezclassify/.github#42',
+  ])
+  assert.deepEqual(calls, [
+    ['ezclassify/release-train', 57], ['ezclassify/orchestration', '16'], ['ezclassify/.github', '42'],
+  ])
+})
+
+test('merge-only refuses a self-reference and a merge to a non-main branch', async () => {
+  const { options } = fixture({ body: 'Depends-on: ezclassify/website#32' })
+  await assert.rejects(requireMergedDependencies({ ...options, producer: undefined }), /cannot depend on itself/)
+  const upstream = fixture().options
+  const read = upstream.readPull
+  upstream.readPull = async (repo, number) => {
+    const pull = await read(repo, number)
+    if (repo === producer) pull.base.ref = 'preview'
+    return pull
+  }
+  await assert.rejects(requireMergedDependencies(upstream), /waiting for ezclassify\/web#26/)
+})
+
+test('snapshot mode still refuses a different official producer', async () => {
+  const { options, calls } = fixture({ body: 'Depends-on: ezclassify/orchestration#16' })
+  await assert.rejects(resolveSnapshot(options), /Use Depends-on: ezclassify\/web/)
+  assert.deepEqual(calls, [[consumer, 32]])
 })
 
 test('a squash commit selects two exact package versions', async () => {
