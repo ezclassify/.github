@@ -41,9 +41,24 @@ test('ordinary CI does not query upstream or the registry', async () => {
   assert.deepEqual(calls, [[consumer, 32]])
 })
 
+test('opt-in ordinary CI resolves an exact published snapshot on producer main', async () => {
+  const version = snapshot(later)
+  const { options } = fixture({
+    body: 'No dependency',
+    found: () => version,
+    contains: (repo, source, target) => repo === producer && source === later && target === 'main',
+  })
+  assert.equal(await resolveSnapshot({ ...options, usePublishedDefault: true }), version)
+  await assert.rejects(resolveSnapshot({ ...options, usePublishedDefault: true, contains: () => false }), /verified default/)
+  await assert.rejects(resolveSnapshot({ ...options, usePublishedDefault: true, published: () => undefined }), /verified default/)
+  await assert.rejects(resolveSnapshot({
+    ...options, usePublishedDefault: true, published: () => ({ version, packages: [packages[0]] }),
+  }), /verified default/)
+})
+
 test('an open upstream PR blocks before any registry work', async () => {
   const { options, calls } = fixture({ merged: false })
-  await assert.rejects(resolveSnapshot(options), /waiting for ezclassify\/web#26 to merge/)
+  await assert.rejects(resolveSnapshot({ ...options, usePublishedDefault: true }), /waiting for ezclassify\/web#26 to merge/)
   assert.deepEqual(calls, [[consumer, 32], [producer, '26']])
 })
 
