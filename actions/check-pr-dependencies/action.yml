@@ -1,9 +1,9 @@
 name: Check upstream PR dependencies
-description: Check that declared upstream changes have published and the consumer pins those snapshots.
+description: Require declared upstream PRs to merge and optionally verify the producer snapshot.
 inputs:
   producer:
-    description: Official owner/repository for the supported package dependency.
-    required: true
+    description: Official owner/repository for snapshot verification. Leave empty to check merge status only.
+    default: ''
   packages:
     description: Space-separated package names from the producer.
     default: ''
@@ -18,10 +18,13 @@ inputs:
     default: ''
   publication-app-id:
     description: Numeric GitHub App ID authorized to report Release Train publication.
-    required: true
+    default: ''
   token:
     description: Read-only GitHub token for the consumer PR and upstream PR metadata.
     required: true
+  upstream-token:
+    description: Optional read-only token from a trusted metadata job for upstream repositories.
+    default: ''
 outputs:
   version:
     description: Exact published snapshot version, or empty when no dependency is declared.
@@ -32,7 +35,7 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Resolve declared upstream snapshot
+    - name: Check declared upstream pull requests
       id: resolve
       shell: bash
       env:
@@ -43,4 +46,5 @@ runs:
         DEPENDENCY_IMAGE: ${{ inputs.image }}
         DEPENDENCY_PUBLICATION_APP_ID: ${{ inputs.publication-app-id }}
         DEPENDENCY_GITHUB_TOKEN: ${{ inputs.token }}
+        DEPENDENCY_UPSTREAM_TOKEN: ${{ inputs.upstream-token }}
       run: node "$GITHUB_ACTION_PATH/check.mjs"
