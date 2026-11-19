@@ -62,10 +62,9 @@ async function mergedDependency(identity) {
   return merged
 }
 
-export async function resolveSnapshot({ packages, packageVersion, contains, manifest, published, ...identity }) {
+export async function resolveSnapshot({ packages, packageVersion, contains, manifest, published, usePublishedDefault = false, ...identity }) {
   const merged = await mergedDependency(identity)
-  if (!merged) return ''
-  const { label, sha } = merged
+  if (!merged && !usePublishedDefault) return ''
   const { producer } = identity
   if (packages.length === 0 || packages.some(name => !/^@ezclassify\/[a-z0-9-]+$/.test(name))) {
     throw new Error('Invalid snapshot dependency configuration.')
@@ -74,12 +73,29 @@ export async function resolveSnapshot({ packages, packageVersion, contains, mani
   const complete = (version, proof) => proof?.version === version &&
     Array.isArray(proof.packages) && packages.every(name => proof.packages.includes(name)) &&
     packages.every(name => packageVersion(name, version) === version)
+  const pins = packages.map(name => manifest?.dependencies?.[name] ?? manifest?.devDependencies?.[name])
+  const checkPins = version => {
+    if (manifest && pins.some(pin => pin !== version)) {
+      throw new Error(`Pin ${packages.join(' and ')} to ${version} in ${identity.manifestPath ?? 'package.json'}, then push the downstream PR.`)
+    }
+  }
+  if (!merged) {
+    const version = packageVersion(packages[0], 'dev-snapshot')
+    const source = snapshotSource(version)
+    if (!source || !await contains(producer, source, 'main') ||
+        !complete(version, await published(producer, source, check, version))) {
+      throw new Error(`Blocked: waiting for a verified default package snapshot from ${producer} main.`)
+    }
+    checkPins(version)
+    console.log(`Resolved the published default ${version} for ${packages.join(', ')}.`)
+    return version
+  }
+  const { label, sha } = merged
   const qualifies = async version => {
     const source = snapshotSource(version) ?? sha
     if (!versionMatchesSource(version, source) || (source !== sha && !await contains(producer, sha, source))) return false
     return complete(version, await published(producer, source, check, version))
   }
-  const pins = packages.map(name => manifest?.dependencies?.[name] ?? manifest?.devDependencies?.[name])
   let version = pins.every(pin => pin === pins[0]) && await qualifies(pins[0]) ? pins[0] : ''
   if (!version) {
     const proof = await published(producer, sha, check)
@@ -94,9 +110,7 @@ export async function resolveSnapshot({ packages, packageVersion, contains, mani
   if (!version) {
     throw new Error(`Blocked: waiting for a complete package snapshot containing ${label} (${sha}). Rerun after publication.`)
   }
-  if (manifest && pins.some(pin => pin !== version)) {
-    throw new Error(`Pin ${packages.join(' and ')} to ${version} in ${identity.manifestPath ?? 'package.json'}, then push the downstream PR.`)
-  }
+  checkPins(version)
   console.log(`Resolved ${label} to ${version} for ${packages.join(', ')}.`)
   return version
 }
@@ -192,6 +206,7 @@ async function main() {
   const version = await resolveSnapshot({
     ...identity,
     manifestPath,
+    usePublishedDefault: env.DEPENDENCY_USE_PUBLISHED_DEFAULT === 'true',
     manifest: env.DEPENDENCY_REQUIRE_PINS === 'false' ? undefined : JSON.parse(readFileSync(manifestPath, 'utf8')),
     packages: env.DEPENDENCY_PACKAGES.trim().split(/\s+/).filter(Boolean),
     packageVersion(name, version) {
