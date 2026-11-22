@@ -56,6 +56,38 @@ test('opt-in ordinary CI resolves an exact published snapshot on producer main',
   }), /verified default/)
 })
 
+test('a numeric private default is bound to the trusted check on current main', async () => {
+  const version = '1.1.0-dev.241'
+  const { options } = fixture({
+    body: 'No dependency',
+    found: () => version,
+    contains: (repo, source, target) => repo === producer && source === later && target === 'main',
+  })
+  const current = {
+    ...options,
+    usePublishedDefault: true,
+    mainRef: () => later,
+    published: (_producer, source) => ({ ...proof(version), source }),
+  }
+  assert.equal(await resolveSnapshot(current), version)
+  await assert.rejects(resolveSnapshot({ ...current, published: () => ({ ...proof(version), source: sha }) }), /verified default/)
+})
+
+test('a later numeric snapshot can satisfy an older merge only with source ancestry and a bound check', async () => {
+  const version = '1.1.0-dev.241'
+  const { options } = fixture({
+    found: () => version,
+    contains: (repo, base, source) => repo === producer && base === sha && source === later,
+  })
+  const current = {
+    ...options,
+    mainRef: () => later,
+    published: (_producer, source) => source === later ? { ...proof(version), source } : undefined,
+  }
+  assert.equal(await resolveSnapshot(current), version)
+  await assert.rejects(resolveSnapshot({ ...current, contains: () => false }), /complete package snapshot/)
+})
+
 test('an open upstream PR blocks before any registry work', async () => {
   const { options, calls } = fixture({ merged: false })
   await assert.rejects(resolveSnapshot({ ...options, usePublishedDefault: true }), /waiting for ezclassify\/web#26 to merge/)
