@@ -56,6 +56,26 @@ test('opt-in ordinary CI resolves an exact published snapshot on producer main',
   }), /verified default/)
 })
 
+test('source-count snapshots require an exact publication summary on the admitted source', async () => {
+  const version = '1.1.0-dev.42'
+  const { options } = fixture({
+    found: (_, requested) => ['dev', version].includes(requested) ? version : undefined,
+    contains: (_, required, main) => required === sha && main === later,
+  })
+  const current = {
+    ...options,
+    mainRef: () => later,
+    published: (_, source) => source === later ? { ...proof(version), source } : undefined,
+  }
+  assert.equal(await resolveSnapshot(current), version)
+  await assert.rejects(resolveSnapshot({ ...current, contains: () => false }), /waiting for a complete package snapshot/)
+  await assert.rejects(resolveSnapshot({
+    ...current, published: () => ({ ...proof(version), source: 'c'.repeat(40) }),
+  }), /waiting for a complete package snapshot/)
+  const defaultPublication = fixture({ body: 'No dependency' }).options
+  assert.equal(await resolveSnapshot({ ...current, readPull: defaultPublication.readPull, usePublishedDefault: true }), version)
+})
+
 test('an open upstream PR blocks before any registry work', async () => {
   const { options, calls } = fixture({ merged: false })
   await assert.rejects(resolveSnapshot({ ...options, usePublishedDefault: true }), /waiting for ezclassify\/web#26 to merge/)
