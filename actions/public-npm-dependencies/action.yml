@@ -1,0 +1,19 @@
+name: Verify public npm dependencies
+description: Install the declared public npm closure using the repository's admission policy.
+inputs:
+  first-publication-packages:
+    description: Approved first-cut package names that may be absent before the first publication.
+    default: ''
+outputs:
+  lane:
+    description: Public installation or approved first-publication bootstrap.
+    value: ${{ steps.install.outputs.lane }}
+runs:
+  using: composite
+  steps:
+    - id: install
+      name: Install from public npm
+      env:
+        EZ_FIRST_PUBLICATION_PACKAGES: ${{ inputs.first-publication-packages }}
+      run: node "$GITHUB_ACTION_PATH/registry.mjs"
+      shell: bash
