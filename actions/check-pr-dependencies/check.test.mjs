@@ -56,36 +56,24 @@ test('opt-in ordinary CI resolves an exact published snapshot on producer main',
   }), /verified default/)
 })
 
-test('a numeric private default is bound to the trusted check on current main', async () => {
-  const version = '1.1.0-dev.241'
+test('source-count snapshots require an exact publication summary on the admitted source', async () => {
+  const version = '1.1.0-dev.42'
   const { options } = fixture({
-    body: 'No dependency',
-    found: () => version,
-    contains: (repo, source, target) => repo === producer && source === later && target === 'main',
-  })
-  const current = {
-    ...options,
-    usePublishedDefault: true,
-    mainRef: () => later,
-    published: (_producer, source) => ({ ...proof(version), source }),
-  }
-  assert.equal(await resolveSnapshot(current), version)
-  await assert.rejects(resolveSnapshot({ ...current, published: () => ({ ...proof(version), source: sha }) }), /verified default/)
-})
-
-test('a later numeric snapshot can satisfy an older merge only with source ancestry and a bound check', async () => {
-  const version = '1.1.0-dev.241'
-  const { options } = fixture({
-    found: () => version,
-    contains: (repo, base, source) => repo === producer && base === sha && source === later,
+    found: (_, requested) => ['dev', version].includes(requested) ? version : undefined,
+    contains: (_, required, main) => required === sha && main === later,
   })
   const current = {
     ...options,
     mainRef: () => later,
-    published: (_producer, source) => source === later ? { ...proof(version), source } : undefined,
+    published: (_, source) => source === later ? { ...proof(version), source } : undefined,
   }
   assert.equal(await resolveSnapshot(current), version)
-  await assert.rejects(resolveSnapshot({ ...current, contains: () => false }), /complete package snapshot/)
+  await assert.rejects(resolveSnapshot({ ...current, contains: () => false }), /waiting for a complete package snapshot/)
+  await assert.rejects(resolveSnapshot({
+    ...current, published: () => ({ ...proof(version), source: 'c'.repeat(40) }),
+  }), /waiting for a complete package snapshot/)
+  const defaultPublication = fixture({ body: 'No dependency' }).options
+  assert.equal(await resolveSnapshot({ ...current, readPull: defaultPublication.readPull, usePublishedDefault: true }), version)
 })
 
 test('an open upstream PR blocks before any registry work', async () => {
